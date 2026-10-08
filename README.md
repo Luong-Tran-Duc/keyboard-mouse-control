@@ -104,10 +104,27 @@ python -m desktop.main
 > ```cmd
 > flash_firmware.bat
 > ```
-> Script sẽ tự động:
-> 1. Gửi gói tin UDP `0xAA` qua Wi-Fi để đưa ESP32 vào **ROM Download Mode** (COM4).
-> 2. Tự dọn sạch thư mục build cũ và biên dịch firmware mới bằng ESP-IDF.
-> 3. Nạp firmware trực tiếp vào mạch 100% tự động.
+
+Công cụ hỗ trợ menu lựa chọn thao tác linh hoạt:
+
+| Phím chọn | Chế độ | Mô tả chi tiết |
+| :---: | :--- | :--- |
+| **`1`** | **Build + Flash** | Dọn dẹp thư mục build, biên dịch lại toàn bộ firmware và tự động nạp vào mạch |
+| **`2`** | **Flash Only** | Bỏ qua bước biên dịch, nạp trực tiếp file `.bin` đã build trước đó siêu tốc (~5-10s) |
+| **`3`** | **Exit** | Thoát chương trình |
+
+```mermaid
+flowchart TD
+    Start(["flash_firmware.bat"]) --> Menu{"Lựa chọn chế độ"}
+    Menu -->|"[1] Build + Flash"| Clean["Clean & Biên dịch firmware"]
+    Menu -->|"[2] Flash Only"| Check["Kiểm tra file binary có sẵn"]
+    Menu -->|"[3] Exit"| Stop(["Thoát"])
+    Clean --> RemoteBoot["Gửi UDP 0xAA vào ROM Download Mode"]
+    Check --> RemoteBoot
+    RemoteBoot --> DetectPort["Tự động dò cổng COM (lọc Bluetooth)"]
+    DetectPort --> FlashBin["Tiến hành nạp firmware vào ESP32-S3"]
+    FlashBin --> Done(["Hoàn tất 100%"])
+```
 
 ---
 

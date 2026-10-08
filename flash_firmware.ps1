@@ -1,12 +1,29 @@
+param(
+    [ValidateSet("BuildAndFlash", "FlashOnly", "")]
+    [string]$Mode = ""
+)
+
 # ESP32-S3 Firmware Build & Flash Script
-# 100% AUTO: Auto-detects ESP32 COM port (filters Bluetooth), waits for device, builds & flashes automatically
+# Auto-detects ESP32 COM port (filters Bluetooth), waits for device, builds & flashes
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $Host.UI.RawUI.WindowTitle = "ESP32-S3 Auto Build & Flash Tool"
 
 Write-Host "====================================================" -ForegroundColor Cyan
-Write-Host "      ESP32-S3 Auto Build & Flash Tool (100% Auto)  " -ForegroundColor Yellow
+Write-Host "      ESP32-S3 Auto Build & Flash Tool              " -ForegroundColor Yellow
 Write-Host "====================================================" -ForegroundColor Cyan
+
+if ([string]::IsNullOrWhiteSpace($Mode)) {
+    Write-Host "`nSelect Flash Mode:" -ForegroundColor Cyan
+    Write-Host "  [1] Build and Flash" -ForegroundColor White
+    Write-Host "  [2] Flash Only (Skip Build)" -ForegroundColor White
+    $choice = Read-Host "Enter option (1/2, default 1)"
+    if ($choice -eq "2") {
+        $Mode = "FlashOnly"
+    } else {
+        $Mode = "BuildAndFlash"
+    }
+}
 
 # 0. Clean old build.txt immediately on launch
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -87,23 +104,37 @@ function Run-Idf {
     return $LASTEXITCODE
 }
 
-# 4. Clean entire previous build directory before building
-Write-Host "[*] Dang clean toan bo build cu de dam bao build sach se 100%..." -ForegroundColor Yellow
-if (Test-Path "build") {
-    Remove-Item -Path "build" -Recurse -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Milliseconds 300
-}
-Write-Host "[OK] Da don dep sach se thu muc build!" -ForegroundColor Green
+# 4. Handle build phase according to chosen Mode
+if ($Mode -eq "FlashOnly") {
+    Write-Host "`n[*] Selected Mode: Flash Only (skipping build phase)..." -ForegroundColor Yellow
+    $buildDir = Join-Path $firmwareDir "build"
+    $binFile = Join-Path $buildDir "km_bridge_firmware.bin"
+    $flasherArgs = Join-Path $buildDir "flasher_args.json"
 
-# 5. Build firmware first (so it's ready while detecting COM port)
-Write-Host "[*] Dang kiem tra va build firmware..." -ForegroundColor Cyan
-$buildRet = Run-Idf @("build")
-if ($buildRet -ne 0) {
-    Write-Host "`n[X] BUILD THAT BAI! Xem chi tiet trong: $buildLogPath" -ForegroundColor Red
-    Read-Host "Nhan Enter de thoat..."
-    exit $buildRet
+    if (-not (Test-Path $buildDir) -or (-not (Test-Path $binFile) -and -not (Test-Path $flasherArgs))) {
+        Write-Host "`n[ERROR] Previous build files not found in '$buildDir'!" -ForegroundColor Red
+        Write-Host "[INFO] Please run 'Build and Flash' first to compile the firmware." -ForegroundColor Yellow
+        Read-Host "Press Enter to exit..."
+        exit 1
+    }
+    Write-Host "[OK] Existing firmware binary verified. Ready to flash." -ForegroundColor Green
+} else {
+    Write-Host "[*] Cleaning previous build directory..." -ForegroundColor Yellow
+    if (Test-Path "build") {
+        Remove-Item -Path "build" -Recurse -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 300
+    }
+    Write-Host "[OK] Build directory cleaned successfully!" -ForegroundColor Green
+
+    Write-Host "[*] Building firmware..." -ForegroundColor Cyan
+    $buildRet = Run-Idf @("build")
+    if ($buildRet -ne 0) {
+        Write-Host "`n[X] BUILD FAILED! Check details in: $buildLogPath" -ForegroundColor Red
+        Read-Host "Press Enter to exit..."
+        exit $buildRet
+    }
+    Write-Host "[OK] Firmware build finished successfully!" -ForegroundColor Green
 }
-Write-Host "[OK] Firmware da san sang!" -ForegroundColor Green
 
 # 6. Intelligent auto-detection of ESP32 COM port (Filtering Bluetooth out)
 function Find-Esp32Port {
