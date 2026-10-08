@@ -1,8 +1,8 @@
-"""Main entry point for KM Bridge Desktop Client."""
-
+import os
 import sys
 import argparse
 import time
+import psutil
 
 from desktop import config
 from desktop.protocol import pack_reboot_bootloader
@@ -10,7 +10,24 @@ from desktop.network import UDPClient
 from desktop.controller import KMController
 
 
+def ensure_single_instance():
+    """Terminate previous running KM Bridge instances to prevent hook collision."""
+    current_pid = os.getpid()
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+        try:
+            if proc.info['pid'] != current_pid and proc.info['name'] and 'python' in proc.info['name'].lower():
+                cmdline = proc.info.get('cmdline') or []
+                cmd_str = ' '.join(cmdline)
+                if 'desktop.main' in cmd_str:
+                    print(f"[*] Found previous KMBridge instance (PID: {proc.info['pid']}). Terminating...")
+                    proc.kill()
+                    proc.wait(timeout=2.0)
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.TimeoutExpired):
+            pass
+
+
 def main():
+    ensure_single_instance()
     parser = argparse.ArgumentParser(
         description="KM Bridge: Share Keyboard & Mouse with Laptop B via ESP32-S3 over Wi-Fi"
     )

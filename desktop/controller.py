@@ -77,12 +77,15 @@ class KMController:
         # Track ctrl / alt for hotkey toggle (Ctrl + Alt + Space)
         self.ctrl_pressed = False
         self.alt_pressed = False
+        self.last_toggle_time = 0.0
+        self.toggle_cooldown = 0.4  # Minimum seconds between state toggles
 
         # Screen metrics
         self.screen_w = user32.GetSystemMetrics(0)
         self.screen_h = user32.GetSystemMetrics(1)
         self.screen_cx = self.screen_w // 2
         self.screen_cy = self.screen_h // 2
+        self.clip_rect = RECT(self.screen_cx, self.screen_cy, self.screen_cx + 1, self.screen_cy + 1)
 
         # High-frequency mouse accumulator (prevents Wi-Fi UDP buffer bloat)
         self.accum_dx = 0
@@ -103,10 +106,18 @@ class KMController:
     def _mouse_sender_loop(self):
         """Dedicated high-speed 125Hz sender loop (8ms interval)."""
         interval = 1.0 / max(30, config.MOUSE_POLL_RATE_HZ)
+        clip_counter = 0
         while self.mouse_worker_running:
             start_t = time.perf_counter()
 
             if self.is_active:
+                # Re-assert cursor clip every ~48ms in case Windows released it on focus change
+                clip_counter += 1
+                if clip_counter >= 6:
+                    clip_counter = 0
+                    user32.SetCursorPos(self.screen_cx, self.screen_cy)
+                    user32.ClipCursor(ctypes.byref(self.clip_rect))
+
                 send_dx = 0
                 send_dy = 0
                 with self.accum_lock:
@@ -137,6 +148,23 @@ class KMController:
             if sleep_time > 0:
                 time.sleep(sleep_time)
 
+    def _play_feedback_sound(self, active: bool):
+        """Play distinct audio beeps for mode switching (non-blocking)."""
+        def sound_worker():
+            try:
+                import winsound
+                if active:
+                    # High dual-beep: Switched to Laptop B
+                    winsound.Beep(1000, 60)
+                    time.sleep(0.03)
+                    winsound.Beep(1500, 80)
+                else:
+                    # Low single-beep: Returned to Laptop A
+                    winsound.Beep(650, 100)
+            except Exception:
+                pass
+        threading.Thread(target=sound_worker, daemon=True).start()
+
     def toggle_state(self):
         """Toggle active control between Laptop A and Laptop B."""
         self.is_active = not self.is_active
@@ -158,14 +186,15 @@ class KMController:
 
             # Center and lock cursor on Laptop A
             user32.SetCursorPos(self.screen_cx, self.screen_cy)
-            clip_rect = RECT(self.screen_cx, self.screen_cy, self.screen_cx + 1, self.screen_cy + 1)
-            user32.ClipCursor(ctypes.byref(clip_rect))
+            user32.ClipCursor(ctypes.byref(self.clip_rect))
 
             # Suppress keyboard and mouse clicks on Laptop A
             if self.kb_listener:
                 self.kb_listener._suppress = True
             if self.mouse_listener:
                 self.mouse_listener.suppress = True
+
+            self._play_feedback_sound(True)
         else:
             print("\n" + "=" * 50)
             print("<<< INACTIVE: CONTROLLING LAPTOP A >>>")
@@ -190,6 +219,8 @@ class KMController:
             if self.mouse_listener:
                 self.mouse_listener.suppress = False
 
+            self._play_feedback_sound(False)
+
     def on_key_press(self, key):
         # Update modifier tracking
         if key in (Key.ctrl_l, Key.ctrl, Key.ctrl_r):
@@ -198,7 +229,16 @@ class KMController:
             self.alt_pressed = True
 
         # Check hotkey: Ctrl + Alt + Space
-        if self.ctrl_pressed and self.alt_pressed and key == Key.space:
+        # Combine pynput tracking with hardware GetAsyncKeyState to prevent desync
+        is_ctrl = self.ctrl_pressed or bool(user32.GetAsyncKeyState(0x11) & 0x8000)
+        is_alt = self.alt_pressed or bool(user32.GetAsyncKeyState(0x12) & 0x8000)
+        is_space = (key == Key.space) or (getattr(key, 'vk', None) == 32) or (getattr(key, 'char', None) == ' ')
+
+        if is_ctrl and is_alt and is_space:
+            now = time.monotonic()
+            if now - self.last_toggle_time < self.toggle_cooldown:
+                return  # Drop bounced / repeated trigger
+            self.last_toggle_time = now
             self.toggle_state()
             return
 

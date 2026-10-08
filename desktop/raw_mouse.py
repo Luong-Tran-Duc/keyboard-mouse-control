@@ -190,8 +190,8 @@ class RawMouseListener:
                 return 1  # Suppress click on Laptop A!
             return user32.CallNextHookEx(None, code, wp, lp)
 
-        hook_cb = HOOKPROCTYPE(hook_proc)
-        h_hook = user32.SetWindowsHookExW(WH_MOUSE_LL, hook_cb, 0, 0)
+        self._hook_cb = HOOKPROCTYPE(hook_proc)
+        h_hook = user32.SetWindowsHookExW(WH_MOUSE_LL, self._hook_cb, 0, 0)
 
         try:
             msg = MSG()
