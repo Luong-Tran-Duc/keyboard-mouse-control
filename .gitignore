@@ -1,0 +1,40 @@
+# ESP-IDF build output and temporary files
+firmware/build/
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/*.bin
+firmware/*.elf
+firmware/*.map
+firmware/build.txt
+
+# Python temporary files and virtual environments
+desktop/__pycache__/
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env
+
+# VS Code and editor files
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# Log files and test outputs
+*.log
+scratch/
+test_*.py
+
