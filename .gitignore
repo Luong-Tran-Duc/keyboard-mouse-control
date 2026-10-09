@@ -18,6 +18,7 @@ env/
 .env
 
 # VS Code and editor files
+.vscode/
 .vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json

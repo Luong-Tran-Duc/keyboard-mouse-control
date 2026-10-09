@@ -65,6 +65,44 @@ def calculate_accelerated_delta(raw_delta: int, sensitivity: float, use_accel: b
     return val if val != 0 else (1 if raw_delta > 0 else -1)
 
 
+class CustomKeyboardListener(keyboard.Listener):
+    """Selective keyboard listener that suppresses keys on Laptop A when controlling Laptop B,
+    while NEVER suppressing modifier key releases (KEYUP) to prevent stuck Ctrl/Alt keys in Windows.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.should_suppress = False
+        self._current_vk = None
+        self._current_msg = None
+
+    def _convert(self, code, msg, lpdata):
+        try:
+            data = ctypes.cast(lpdata, self._LPKBDLLHOOKSTRUCT).contents
+            self._current_vk = data.vkCode
+            self._current_msg = msg
+        except Exception:
+            self._current_vk = None
+            self._current_msg = None
+        return super()._convert(code, msg, lpdata)
+
+    @property
+    def suppress(self):
+        if not self.should_suppress:
+            return False
+
+        # NEVER suppress modifier keys (Ctrl, Alt, Shift, Win) - let Windows track them cleanly!
+        # This guarantees GetAsyncKeyState and OS key states are NEVER desynced or stuck.
+        MODIFIER_VKS = {0x10, 0x11, 0x12, 0x5B, 0x5C, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5}
+        if self._current_vk in MODIFIER_VKS:
+            return False
+
+        # NEVER suppress emergency escape keys: Pause/Break (0x13), Scroll Lock (0x91)
+        if self._current_vk in (0x13, 0x91):
+            return False
+
+        return True
+
+
 class KMController:
     def __init__(self):
         self.client = UDPClient(config.ESP32_IP, config.UDP_PORT)
@@ -165,9 +203,32 @@ class KMController:
                 pass
         threading.Thread(target=sound_worker, daemon=True).start()
 
+    def _release_local_modifiers(self):
+        """Synthesize key-up for all modifier keys and Space in Windows to guarantee zero stuck keys."""
+        VK_KEYS = [
+            0x11, 0xA2, 0xA3,  # VK_CONTROL, VK_LCONTROL, VK_RCONTROL
+            0x12, 0xA4, 0xA5,  # VK_MENU, VK_LMENU, VK_RMENU
+            0x10, 0xA0, 0xA1,  # VK_SHIFT, VK_LSHIFT, VK_RSHIFT
+            0x5B, 0x5C,        # VK_LWIN, VK_RWIN
+            0x20               # VK_SPACE
+        ]
+        for vk in VK_KEYS:
+            user32.keybd_event(vk, 0, 0x0002, 0)
+
     def toggle_state(self):
         """Toggle active control between Laptop A and Laptop B."""
         self.is_active = not self.is_active
+
+        # Always flush and release local modifiers in Windows OS
+        self._release_local_modifiers()
+        self.ctrl_pressed = False
+        self.alt_pressed = False
+        self.active_modifiers = 0
+        self.pressed_hid_codes.clear()
+
+        with self.accum_lock:
+            self.accum_dx = 0
+            self.accum_dy = 0
 
         if self.is_active:
             print("\n" + "=" * 50)
@@ -175,14 +236,6 @@ class KMController:
             print("Press [Ctrl + Alt + Space] to return to Laptop A")
             print("=" * 50)
             self.client.send(pack_active())
-            self.pressed_hid_codes.clear()
-            self.ctrl_pressed = False
-            self.alt_pressed = False
-            self.active_modifiers = 0
-
-            with self.accum_lock:
-                self.accum_dx = 0
-                self.accum_dy = 0
 
             # Center and lock cursor on Laptop A
             user32.SetCursorPos(self.screen_cx, self.screen_cy)
@@ -190,7 +243,7 @@ class KMController:
 
             # Suppress keyboard and mouse clicks on Laptop A
             if self.kb_listener:
-                self.kb_listener._suppress = True
+                self.kb_listener.should_suppress = True
             if self.mouse_listener:
                 self.mouse_listener.suppress = True
 
@@ -201,40 +254,57 @@ class KMController:
             print("Press [Ctrl + Alt + Space] to switch to Laptop B")
             print("=" * 50)
             self.client.send(pack_inactive())
-            self.pressed_hid_codes.clear()
-            self.ctrl_pressed = False
-            self.alt_pressed = False
-            self.active_modifiers = 0
-
-            with self.accum_lock:
-                self.accum_dx = 0
-                self.accum_dy = 0
 
             # Unlock cursor on Laptop A
             user32.ClipCursor(None)
 
             # Release suppression
             if self.kb_listener:
-                self.kb_listener._suppress = False
+                self.kb_listener.should_suppress = False
             if self.mouse_listener:
                 self.mouse_listener.suppress = False
 
             self._play_feedback_sound(False)
 
+    def _emergency_unlock(self):
+        """Emergency fail-safe: immediately release all controls back to Laptop A."""
+        self.is_active = False
+        user32.ClipCursor(None)
+        self._release_local_modifiers()
+        if self.kb_listener:
+            self.kb_listener.should_suppress = False
+        if self.mouse_listener:
+            self.mouse_listener.suppress = False
+        self.ctrl_pressed = False
+        self.alt_pressed = False
+        self.active_modifiers = 0
+        self.pressed_hid_codes.clear()
+        with self.accum_lock:
+            self.accum_dx = 0
+            self.accum_dy = 0
+        try:
+            self.client.send(pack_inactive())
+        except Exception:
+            pass
+
     def on_key_press(self, key):
+        # Emergency escape: Pause/Break, Scroll Lock immediately unlocks back to Laptop A
+        if key in (Key.pause, Key.scroll_lock):
+            print("\n[EMERGENCY ESCAPE] Emergency key pressed! Returning to Laptop A...")
+            self._emergency_unlock()
+            self._play_feedback_sound(False)
+            return
+
         # Update modifier tracking
         if key in (Key.ctrl_l, Key.ctrl, Key.ctrl_r):
             self.ctrl_pressed = True
-        if key in (Key.alt_l, Key.alt, Key.alt_r, Key.alt_gr):
+        elif key in (Key.alt_l, Key.alt, Key.alt_r, Key.alt_gr):
             self.alt_pressed = True
 
         # Check hotkey: Ctrl + Alt + Space
-        # Combine pynput tracking with hardware GetAsyncKeyState to prevent desync
-        is_ctrl = self.ctrl_pressed or bool(user32.GetAsyncKeyState(0x11) & 0x8000)
-        is_alt = self.alt_pressed or bool(user32.GetAsyncKeyState(0x12) & 0x8000)
         is_space = (key == Key.space) or (getattr(key, 'vk', None) == 32) or (getattr(key, 'char', None) == ' ')
 
-        if is_ctrl and is_alt and is_space:
+        if self.ctrl_pressed and self.alt_pressed and is_space:
             now = time.monotonic()
             if now - self.last_toggle_time < self.toggle_cooldown:
                 return  # Drop bounced / repeated trigger
@@ -315,16 +385,16 @@ class KMController:
         """Start listening for mouse and keyboard events."""
         print("KM Bridge Client started.")
         print(f"Target ESP32: {config.ESP32_IP}:{config.UDP_PORT}")
-        print(f"Toggle Hotkey: Ctrl + Alt + Space")
+        print("Toggle Hotkey: Ctrl + Alt + Space")
+        print("Emergency Escape: Press [Pause/Break] or [Scroll Lock]")
         print(f"Mouse Rate: {config.MOUSE_POLL_RATE_HZ}Hz (Anti-Lag Batching)")
         print(f"Sensitivity: {config.MOUSE_SENSITIVITY}x")
         print("Current mode: CONTROLLING LAPTOP A")
         print("Press Ctrl+C to terminate.")
 
-        self.kb_listener = keyboard.Listener(
+        self.kb_listener = CustomKeyboardListener(
             on_press=self.on_key_press,
-            on_release=self.on_key_release,
-            suppress=False
+            on_release=self.on_key_release
         )
         self.kb_listener.start()
         self.mouse_listener.start()
@@ -339,6 +409,7 @@ class KMController:
         print("\nStopping KM Bridge Client...")
         self.mouse_worker_running = False
         user32.ClipCursor(None)
+        self._release_local_modifiers()
         if self.is_active:
             self.client.send(pack_inactive())
         if self.kb_listener:

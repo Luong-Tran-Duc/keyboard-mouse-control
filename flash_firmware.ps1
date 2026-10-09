@@ -176,7 +176,7 @@ try {
     $rebootPkt = [byte[]]@(0xAA)
     $broadcastEp = New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Broadcast, 9876)
     $udpClient.Send($rebootPkt, $rebootPkt.Length, $broadcastEp) | Out-Null
-    $unicastEp = New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Parse("192.168.1.217"), 9876)
+    $unicastEp = New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Parse("192.168.1.216"), 9876)
     $udpClient.Send($rebootPkt, $rebootPkt.Length, $unicastEp) | Out-Null
     $udpClient.Close()
 } catch {}

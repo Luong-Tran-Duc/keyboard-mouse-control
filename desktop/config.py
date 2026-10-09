@@ -1,7 +1,7 @@
 """Configuration for KM Bridge Desktop Client."""
 
 # Network Configuration
-ESP32_IP = "192.168.1.217"
+ESP32_IP = "192.168.1.216"
 UDP_PORT = 9876
 
 # Hotkey to toggle control between Laptop A and Laptop B

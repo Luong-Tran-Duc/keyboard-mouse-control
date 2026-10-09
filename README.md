@@ -96,6 +96,10 @@ python -m desktop.main
   - Chuyển sang điều khiển **Laptop B** (Đèn LED ESP32 chuyển sang màu Cyan 🔵, chuột và bàn phím Laptop A bị khóa và chuyển hướng sang Laptop B).
   - Bấm lại **`Ctrl + Alt + Space`** để trả quyền điều khiển về **Laptop A** (Đèn LED ESP32 chuyển về màu Xanh lá 🟢).
 
+> [!TIP]
+> **Phím Thoát Khẩn Cấp (Emergency Escape):**
+> Trong bất kỳ tình huống nào muốn cưỡng chế mở khóa và trả toàn quyền điều khiển về **Laptop A** ngay lập tức, bạn chỉ cần bấm phím **`Pause/Break`** hoặc **`Scroll Lock`**. Hệ thống sẽ lập tức gỡ bỏ `ClipCursor`, nhả toàn bộ hook và khôi phục hoạt động cho Laptop A mà không cần khởi động lại máy!
+
 ### 3. Nạp Firmware hoặc Cập Nhật từ xa (OTA Bootloader)
 
 > [!IMPORTANT]
