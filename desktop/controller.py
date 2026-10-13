@@ -18,6 +18,12 @@ except Exception:
     except Exception:
         pass
 
+# Enable 1ms high-resolution multimedia timer on Windows to eliminate sleep jitter
+try:
+    ctypes.windll.winmm.timeBeginPeriod(1)
+except Exception:
+    pass
+
 from desktop import config
 from desktop.protocol import (
     pack_mouse_move, pack_mouse_click, pack_mouse_scroll,
@@ -149,11 +155,14 @@ class KMController:
             start_t = time.perf_counter()
 
             if self.is_active:
-                # Re-assert cursor clip every ~48ms in case Windows released it on focus change
+                # Maintain cursor clip without spamming SetCursorPos unless cursor drifted
                 clip_counter += 1
-                if clip_counter >= 6:
+                if clip_counter >= 12:
                     clip_counter = 0
-                    user32.SetCursorPos(self.screen_cx, self.screen_cy)
+                    pt = wintypes.POINT()
+                    user32.GetCursorPos(ctypes.byref(pt))
+                    if pt.x != self.screen_cx or pt.y != self.screen_cy:
+                        user32.SetCursorPos(self.screen_cx, self.screen_cy)
                     user32.ClipCursor(ctypes.byref(self.clip_rect))
 
                 send_dx = 0
@@ -417,4 +426,8 @@ class KMController:
         if self.mouse_listener:
             self.mouse_listener.stop()
         self.client.close()
+        try:
+            ctypes.windll.winmm.timeEndPeriod(1)
+        except Exception:
+            pass
         print("Stopped.")

@@ -30,8 +30,8 @@ const char *hid_string_descriptor[5] = {
 static const uint8_t hid_configuration_descriptor[] = {
     // Configuration descriptor
     TUD_CONFIG_DESCRIPTOR(1, 1, 0, TUSB_DESC_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
-    // HID interface descriptor
-    TUD_HID_DESCRIPTOR(0, 4, false, sizeof(hid_report_descriptor), 0x81, 16, 10),
+    // HID interface descriptor (bInterval = 1ms for 1000Hz polling rate)
+    TUD_HID_DESCRIPTOR(0, 4, false, sizeof(hid_report_descriptor), 0x81, 16, 1),
 };
 
 // Internal input state
@@ -120,12 +120,28 @@ static bool send_keyboard_report_with_retry(void)
 
 void usb_hid_mouse_move(int16_t dx, int16_t dy)
 {
-    if (!tud_mounted() || !tud_hid_ready()) return;
+    if (!tud_mounted()) return;
 
-    if (xSemaphoreTake(s_hid_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
-        int8_t clamped_x = clamp_i8(dx);
-        int8_t clamped_y = clamp_i8(dy);
-        tud_hid_mouse_report(HID_ITF_PROTOCOL_MOUSE, s_mouse_buttons, clamped_x, clamped_y, 0, 0);
+    if (xSemaphoreTake(s_hid_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        static int16_t accum_x = 0;
+        static int16_t accum_y = 0;
+
+        accum_x += dx;
+        accum_y += dy;
+
+        // Try to send report, or wait briefly if USB endpoint is temporarily busy
+        for (int retry = 0; retry < 4; retry++) {
+            if (tud_hid_ready()) {
+                int8_t clamped_x = clamp_i8(accum_x);
+                int8_t clamped_y = clamp_i8(accum_y);
+                if (tud_hid_mouse_report(HID_ITF_PROTOCOL_MOUSE, s_mouse_buttons, clamped_x, clamped_y, 0, 0)) {
+                    accum_x -= clamped_x;
+                    accum_y -= clamped_y;
+                    break;
+                }
+            }
+            vTaskDelay(pdMS_TO_TICKS(1));
+        }
         xSemaphoreGive(s_hid_mutex);
     }
 }

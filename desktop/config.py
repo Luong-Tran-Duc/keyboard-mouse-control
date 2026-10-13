@@ -14,8 +14,8 @@ MOUSE_SENSITIVITY = 1.0
 # Disable acceleration for pure 1:1 linear tracking
 MOUSE_ACCELERATION = False
 
-# Mouse transmission rate in Hz (100Hz = 10ms, perfectly matched to USB HID 10ms polling interval)
-MOUSE_POLL_RATE_HZ = 100
+# Mouse transmission rate in Hz (125Hz = 8ms interval for smooth tracking)
+MOUSE_POLL_RATE_HZ = 125
 
 # Invert axes if desired
 INVERT_X = False
